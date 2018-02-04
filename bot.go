@@ -32,6 +32,7 @@ type Bot struct {
 	Channels          map[string]Channel
 	channelUpdateLock sync.Mutex
 	Myself            slack.UserDetails
+	slashCh           chan *SlashCommand
 
 	// Internal handling
 	listeners     []*Listener
@@ -57,6 +58,7 @@ func New(configFile string) *Bot {
 		outgoingMsgCh: make(chan *slack.OutgoingMessage, 500),
 		addListenerCh: make(chan *Listener, 500),
 		delListenerCh: make(chan *Listener, 500),
+		slashCh:       make(chan *SlashCommand, 500),
 
 		Users:    make(map[string]slack.User),
 		Channels: make(map[string]Channel),
@@ -368,6 +370,8 @@ func (bot *Bot) messageHandler() {
 
 		case event := <-bot.rtm.IncomingEvents:
 			bot.handleRTMEvent(&event)
+		case slash := <-bot.slashCh:
+			bot.handleSlashCommand(slash)
 		}
 
 		// Always flush listeners deletions between messages, so a
@@ -380,6 +384,21 @@ func (bot *Bot) messageHandler() {
 				goto nextMessages
 			}
 		}
+	}
+}
+
+func (bot *Bot) handleSlashCommand(s *SlashCommand) {
+	// Dispatch listeners
+	listenerExists := false
+	for _, listen := range bot.listeners {
+		if s != nil && listen.SlashCommandHandlerFunc != nil {
+			if listen.filterAndDispatchSlashCommand(s) {
+				listenerExists = true
+			}
+		}
+	}
+	if !listenerExists {
+		s.RespondRejection()
 	}
 }
 

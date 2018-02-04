@@ -31,6 +31,10 @@ type Listener struct {
 	// `Room`. This can be mixed and matched with `FromUser`
 	FromChannel *Channel
 
+	// FromSlashCommand filters based on if a SlashCommand is issued
+	// Should be of the form "/<command>"
+	FromSlashCommand string
+
 	// PrivateOnly filters out public messages.
 	PrivateOnly bool
 
@@ -82,6 +86,10 @@ type Listener struct {
 	// which embeds the the original event, but adds quite a few functionalities, like
 	// reply modes, etc..
 	EventHandlerFunc func(*Listener, interface{})
+
+	// SlashCommandHandlerFunc listens for an incoming Slashcommand
+	// this will not return anything if the SlashCommand plugin is not activated
+	SlashCommandHandlerFunc func(*SlashCommand)
 
 	// TimeoutFunc is called when a conversation expires after
 	// `ListenDuration` or `ListenUntil` delays.  It is *not* called
@@ -177,8 +185,18 @@ func (listen *Listener) checkParams() error {
 		return fmt.Errorf("`Contains` and `ContainsAny` are mutually exclusive.")
 	}
 
-	if (listen.MessageHandlerFunc == nil && listen.EventHandlerFunc == nil) || (listen.MessageHandlerFunc != nil && listen.EventHandlerFunc != nil) {
-		return fmt.Errorf("One and only one of `MessageHandlerFunc` and `EventHandlerFunc` is required.")
+	numHandlers := 0
+	if listen.MessageHandlerFunc != nil {
+		numHandlers++
+	}
+	if listen.EventHandlerFunc != nil {
+		numHandlers++
+	}
+	if listen.SlashCommandHandlerFunc != nil {
+		numHandlers++
+	}
+	if numHandlers != 1 {
+		return fmt.Errorf("One and only one of `MessageHandlerFunc`, `EventHandlerFunc`, and `SlashCommandHandlerFunc` is required.")
 	}
 
 	return nil
@@ -187,6 +205,19 @@ func (listen *Listener) checkParams() error {
 func (listen *Listener) setupChannels() {
 	listen.resetCh = make(chan bool, 10)
 	listen.doneCh = make(chan bool, 10)
+}
+
+func (listen *Listener) filterAndDispatchSlashCommand(sc *SlashCommand) bool {
+	if listen.filterSlashCommand(sc) {
+		listen.SlashCommandHandlerFunc(sc)
+		return true
+	}
+
+	return false
+}
+
+func (listen *Listener) filterSlashCommand(sc *SlashCommand) bool {
+	return listen.FromSlashCommand == sc.Command
 }
 
 func (listen *Listener) filterAndDispatchMessage(msg *Message) {
